@@ -173,3 +173,75 @@ export function buildAtsResume(resume: string, jobCargo: string, analysis: Analy
   block("IDIOMAS", s.idiomas);
   return out.join("\n").trim();
 }
+
+// ---------- Currículo ATS estruturado ----------
+export interface AtsSectionData {
+  id: "resumo" | "competencias" | "experiencia" | "formacao" | "certificacoes" | "idiomas";
+  title: string;
+  lines: string[];
+}
+export interface AtsStructured {
+  name: string;
+  contact: string;
+  objective: string;
+  sections: AtsSectionData[];
+  keywords: string[]; // termos da vaga comprovados
+}
+
+export function buildAtsStructured(resume: string, jobCargo: string, analysis: AnalysisResult, years: number | null): AtsStructured {
+  const c = extractContact(resume);
+  const s = rawSections(resume);
+  const provenItems = analysis.categories.filter((x) => x.id !== "cargo").flatMap((x) => x.items).filter((i) => i.evidence !== "nao_encontrada");
+  const proven = provenItems.map((i) => i.label);
+  const bullet = (l: string) => l.replace(/^[-•*]\s*/, "");
+  const sections: AtsSectionData[] = [
+    {
+      id: "resumo",
+      title: "Resumo Profissional",
+      lines: [
+        `Profissional${years ? ` com ${years} ano(s) de experiência` : ""}${proven.length ? `, com atuação em ${proven.slice(0, 5).join(", ")}` : ""}.`,
+      ],
+    },
+    { id: "competencias", title: "Competências", lines: proven },
+    { id: "experiencia", title: "Experiência Profissional", lines: s.experiencia.map(bullet) },
+    { id: "formacao", title: "Formação Acadêmica", lines: s.formacao.map(bullet) },
+    { id: "certificacoes", title: "Certificações", lines: s.certificacoes.map(bullet) },
+    { id: "idiomas", title: "Idiomas", lines: s.idiomas.map(bullet) },
+  ];
+  return {
+    name: c.name ?? "Seu Nome",
+    contact: [c.email, c.phone, c.linkedin].filter(Boolean).join(" | "),
+    objective: jobCargo,
+    sections: sections.filter((x) => x.lines.length > 0),
+    keywords: [...new Set(provenItems.map((i) => i.matchedAs ?? i.label))],
+  };
+}
+
+export function atsToText(a: AtsStructured) {
+  const out = [a.name.toUpperCase(), a.contact, ""];
+  if (a.objective) out.push("OBJETIVO", a.objective, "");
+  for (const s of a.sections) {
+    out.push(s.title.toUpperCase());
+    if (s.id === "competencias") out.push(s.lines.join(" • "));
+    else out.push(...s.lines.map((l) => (s.id === "experiencia" && !/^\d/.test(l) ? "- " + l : l)));
+    out.push("");
+  }
+  return out.join("\n").trim();
+}
+
+// Legibilidade/estrutura para ATS (0-100)
+export function structureScore(text: string) {
+  const n = normalizeText(text);
+  let pts = 0;
+  const checks = [
+    /experiencia/.test(n),
+    /formacao|educacao|graduacao/.test(n),
+    /competencia|habilidade|conhecimento/.test(n),
+    /resumo|perfil|objetivo/.test(n),
+    /@/.test(text),
+    !/\t|\|.*\|.*\|/.test(text), // sem tabelas/colunas
+    text.split("\n").length > 8, // quebrado em linhas/seções
+  ];
+  for (const c of checks) if (c) pts++;
+  return Math.round((pts / checks.length) * 100);
+}

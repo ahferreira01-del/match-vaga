@@ -3,9 +3,10 @@ import { useRef, useState } from "react";
 import { extractTextFromFile } from "@/lib/fileParse";
 import { fetchJobFromUrl } from "@/lib/jobUrl.functions";
 import {
-  buildAtsResume, cargoScore, detectJobCargo, detectJobSeniority, detectResumeCargo,
-  detectResumeSeniority, seniorityScore, SENIORITY_LABEL, type Seniority,
+  buildAtsStructured, cargoScore, detectJobCargo, detectJobSeniority, detectResumeCargo,
+  detectResumeSeniority, seniorityScore, SENIORITY_LABEL, type Seniority, type AtsStructured,
 } from "@/lib/profile";
+import { AtsResume } from "@/components/AtsResume";
 import { analyze, type AnalysisResult, type Evidence } from "@/lib/analyzer";
 
 export const Route = createFileRoute("/")({
@@ -97,7 +98,8 @@ interface Extra {
   jobYears: number | null;
   seniorityScore: number | null;
   parts: { label: string; score: number; weight: number }[];
-  atsResume: string;
+  analysis: AnalysisResult;
+  ats: AtsStructured;
 }
 
 function StatCard({ title, value, sub }: { title: string; value: number | null; sub: string }) {
@@ -179,7 +181,8 @@ function Index() {
       competencyScore: a.score, cvCargo, jobCargo, cargoScore: cScore,
       cvSeniority: cvSen.level, cvYears: cvSen.years, jobSeniority: jobSen.level, jobYears: jobSen.years,
       seniorityScore: sScore, parts: parts.map((p) => ({ ...p, weight: Math.round((p.weight / tw) * 100) })),
-      atsResume: buildAtsResume(resume, jobCargo, a, cvSen.years),
+      analysis: a,
+      ats: buildAtsStructured(resume, jobCargo, a, cvSen.years),
     });
     setTimeout(() => {
       document.getElementById("resultado")?.scrollIntoView({ behavior: "smooth" });
@@ -444,39 +447,7 @@ function Index() {
             </div>
 
             {extra && (
-              <div className="rounded-2xl border bg-card p-6 shadow-sm">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="font-semibold">📝 Currículo ATS-friendly</h3>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => navigator.clipboard.writeText(extra.atsResume)}
-                      className="rounded-full border px-4 py-1.5 text-xs font-medium hover:bg-muted"
-                    >
-                      Copiar
-                    </button>
-                    <button
-                      onClick={() => {
-                        const url = URL.createObjectURL(new Blob([extra.atsResume], { type: "text/plain;charset=utf-8" }));
-                        const a = document.createElement("a");
-                        a.href = url;
-                        a.download = "curriculo-ats.txt";
-                        a.click();
-                        URL.revokeObjectURL(url);
-                      }}
-                      className="rounded-full bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground"
-                    >
-                      Baixar .txt
-                    </button>
-                  </div>
-                </div>
-                <p className="mb-3 text-xs text-muted-foreground">
-                  Formato simples, sem tabelas nem colunas, com seções padrão. Usa apenas o que está no seu currículo —
-                  nenhuma informação foi inventada. Revise antes de enviar.
-                </p>
-                <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-xl border bg-background p-4 text-xs">
-                  {extra.atsResume}
-                </pre>
-              </div>
+              <AtsResume resume={resume} job={job} analysis={extra.analysis} ats={extra.ats} />
             )}
 
             <p className="text-center text-xs text-muted-foreground">
