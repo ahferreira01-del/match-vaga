@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { analyze, type AnalysisResult, type KeywordStatus } from "@/lib/analyzer";
+import { analyze, type AnalysisResult, type Evidence } from "@/lib/analyzer";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -64,22 +64,18 @@ function ScoreRing({ score }: { score: number }) {
   );
 }
 
-function StatusBadge({ status }: { status: KeywordStatus }) {
-  if (status === "encontrada")
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-0.5 text-xs font-medium text-accent-foreground">
-        ✅ Encontrada
-      </span>
-    );
-  if (status === "parcial")
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-warning/20 px-2.5 py-0.5 text-xs font-medium text-warning-foreground">
-        ⚠️ Parcial
-      </span>
-    );
+const EVIDENCE: Record<Evidence, { label: string; cls: string }> = {
+  forte: { label: "✅ Forte", cls: "bg-accent text-accent-foreground" },
+  moderada: { label: "🟡 Moderada", cls: "bg-warning/20 text-warning-foreground" },
+  fraca: { label: "🟠 Fraca", cls: "bg-warning/10 text-warning-foreground" },
+  nao_encontrada: { label: "❌ Não encontrada", cls: "bg-destructive/10 text-destructive" },
+};
+
+function EvidenceBadge({ evidence }: { evidence: Evidence }) {
+  const e = EVIDENCE[evidence];
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2.5 py-0.5 text-xs font-medium text-destructive">
-      ❌ Ausente
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${e.cls}`}>
+      {e.label}
     </span>
   );
 }
@@ -159,7 +155,7 @@ function Index() {
           {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
         </div>
 
-        {result && Array.isArray(result.categories) && Array.isArray(result.jobKeywords) && (
+        {result && Array.isArray(result.categories) && Array.isArray(result.mandatoryMissing) && (
           <section id="resultado" className="mt-16 space-y-8">
             <div className="rounded-2xl border bg-card p-8 shadow-sm">
               <h2 className="mb-6 text-xl font-bold">
@@ -172,13 +168,11 @@ function Index() {
                     {scoreLabel(result.score)}
                   </h3>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Seu currículo cobre {result.matched.length} de {result.jobKeywords.length}{" "}
-                    termos-chave identificados na vaga
-                    {result.partial.length > 0 &&
-                      `, com ${result.partial.length} correspondência(s) parcial(is)`}
-                    .
-                    {result.score < 70 &&
-                      " Inclua os termos em falta (quando forem verdadeiros para você) para aumentar suas chances."}
+                    {result.totalCompetencies === 0
+                      ? "Não identificamos competências profissionais reconhecíveis na vaga."
+                      : `Seu currículo comprova ${result.totalFound} de ${result.totalCompetencies} competências exigidas pela vaga.`}
+                    {result.mandatoryMissing.length > 0 &&
+                      ` Requisitos obrigatórios sem evidência: ${result.mandatoryMissing.join(", ")}.`}
                   </p>
                 </div>
               </div>
@@ -196,16 +190,25 @@ function Index() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-xs text-muted-foreground">
-                      <th className="px-6 py-2 font-medium">Palavra-chave</th>
-                      <th className="px-6 py-2 font-medium">Status</th>
+                      <th className="px-6 py-2 font-medium">Competência</th>
+                      <th className="px-6 py-2 font-medium">Requisito</th>
+                      <th className="px-6 py-2 font-medium">Evidência</th>
                     </tr>
                   </thead>
                   <tbody>
                     {cat.items.map((item) => (
-                      <tr key={item.term} className="border-b last:border-0">
-                        <td className="px-6 py-2.5 font-medium">{item.term}</td>
+                      <tr key={item.id} className="border-b last:border-0">
                         <td className="px-6 py-2.5">
-                          <StatusBadge status={item.status} />
+                          <div className="font-medium">{item.label}</div>
+                          {item.matchedAs && (
+                            <div className="text-xs text-muted-foreground">encontrado como “{item.matchedAs}”</div>
+                          )}
+                        </td>
+                        <td className="px-6 py-2.5 text-xs">
+                          {item.requirement === "obrigatorio" ? "Obrigatório" : "Desejável"}
+                        </td>
+                        <td className="px-6 py-2.5">
+                          <EvidenceBadge evidence={item.evidence} />
                         </td>
                       </tr>
                     ))}
@@ -239,7 +242,7 @@ function Index() {
                   <tr className="font-bold">
                     <td className="py-2.5 pr-4">Total</td>
                     <td className="py-2.5 pr-4">
-                      {result.matched.length}/{result.jobKeywords.length}
+                      {result.totalFound}/{result.totalCompetencies}
                     </td>
                     <td className={`py-2.5 ${scoreColor(result.score)}`}>{result.score}%</td>
                   </tr>
@@ -248,8 +251,8 @@ function Index() {
             </div>
 
             <p className="text-center text-xs text-muted-foreground">
-              A análise é baseada em correspondência de palavras-chave e acontece 100% no seu
-              navegador — nada é enviado ou armazenado.
+              A análise compara competências (não palavras soltas), considera equivalências, o peso
+              de cada requisito e onde a evidência aparece no currículo. Acontece 100% no seu navegador — nada é enviado ou armazenado.
             </p>
           </section>
         )}
