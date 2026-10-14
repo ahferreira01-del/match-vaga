@@ -264,7 +264,7 @@ function Index() {
               />
               <button
                 type="button"
-                onClick={loadUrl}
+                onClick={() => void loadUrl()}
                 disabled={loadingUrl}
                 className="rounded-full border px-4 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
               >
