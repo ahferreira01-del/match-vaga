@@ -141,18 +141,30 @@ function Index() {
     }
   };
 
-  const loadUrl = async () => {
-    if (!jobUrl.trim()) return;
+  const lastFetchedUrl = useRef("");
+
+  const loadUrl = async (url?: string) => {
+    const u = (url ?? jobUrl).trim();
+    if (!u || u === lastFetchedUrl.current) return;
+    lastFetchedUrl.current = u;
     setLoadingUrl(true);
     setError("");
     try {
-      const r = await fetchJobFromUrl({ data: { url: jobUrl.trim() } });
+      const r = await fetchJobFromUrl({ data: { url: u } });
       if (r.ok) setJob(r.text);
       else setError(r.error);
     } catch {
       setError("Link inválido.");
     } finally {
       setLoadingUrl(false);
+    }
+  };
+
+  const onJobUrlChange = (value: string) => {
+    setJobUrl(value);
+    const v = value.trim();
+    if (/^https?:\/\/\S+\.\S+/.test(v) && v !== lastFetchedUrl.current) {
+      void loadUrl(v);
     }
   };
 
@@ -246,13 +258,13 @@ function Index() {
             <div className="mb-3 flex gap-2">
               <input
                 value={jobUrl}
-                onChange={(e) => setJobUrl(e.target.value)}
-                placeholder="Cole o link da vaga (opcional)"
+                onChange={(e) => onJobUrlChange(e.target.value)}
+                placeholder="Cole o link da vaga — a importação é automática"
                 className="min-w-0 flex-1 rounded-full border bg-background px-4 py-1.5 text-xs outline-none focus:ring-2 focus:ring-ring"
               />
               <button
                 type="button"
-                onClick={loadUrl}
+                onClick={() => void loadUrl()}
                 disabled={loadingUrl}
                 className="rounded-full border px-4 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
               >
