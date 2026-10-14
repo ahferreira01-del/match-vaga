@@ -14,7 +14,7 @@ export async function extractTextFromFile(file: File): Promise<{ text: string; p
       let lastY: number | null = null;
       let line = "";
       for (const item of content.items as { str: string; transform: number[] }[]) {
-        const y = item.transform[5];
+        const y = item.transform[5] ?? 0;
         if (lastY !== null && Math.abs(y - lastY) > 2) {
           lines.push(line.trim());
           line = "";

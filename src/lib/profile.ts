@@ -69,7 +69,7 @@ export function detectResumeCargo(resume: string): string {
   const lines = resume.split("\n").map((l) => l.trim()).filter(Boolean);
   const objIdx = lines.findIndex((l) => /^(objetivo|cargo pretendido)/i.test(normalizeText(l)));
   if (objIdx >= 0) {
-    const same = lines[objIdx].split(/[:\-–]/).slice(1).join(" ").trim();
+    const same = (lines[objIdx] ?? "").split(/[:\-–]/).slice(1).join(" ").trim();
     return same || lines[objIdx + 1] || "";
   }
   return lines.slice(0, 6).find((l) => CARGO_WORDS.test(normalizeText(l)) && l.length < 80) ?? "";
