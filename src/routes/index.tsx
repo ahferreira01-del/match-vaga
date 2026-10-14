@@ -159,7 +159,7 @@ function Index() {
           {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
         </div>
 
-        {result && (
+        {result && Array.isArray(result.categories) && Array.isArray(result.jobKeywords) && (
           <section id="resultado" className="mt-16 space-y-8">
             <div className="rounded-2xl border bg-card p-8 shadow-sm">
               <h2 className="mb-6 text-xl font-bold">
