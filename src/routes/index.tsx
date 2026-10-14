@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { analyze, type AnalysisResult } from "@/lib/analyzer";
+import { analyze, type AnalysisResult, type KeywordStatus } from "@/lib/analyzer";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -64,16 +64,22 @@ function ScoreRing({ score }: { score: number }) {
   );
 }
 
-function Chip({ label, variant }: { label: string; variant: "match" | "miss" }) {
+function StatusBadge({ status }: { status: KeywordStatus }) {
+  if (status === "encontrada")
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-0.5 text-xs font-medium text-accent-foreground">
+        ✅ Encontrada
+      </span>
+    );
+  if (status === "parcial")
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-warning/20 px-2.5 py-0.5 text-xs font-medium text-warning-foreground">
+        ⚠️ Parcial
+      </span>
+    );
   return (
-    <span
-      className={
-        variant === "match"
-          ? "rounded-full bg-accent px-3 py-1 text-xs font-medium text-accent-foreground"
-          : "rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground"
-      }
-    >
-      {label}
+    <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2.5 py-0.5 text-xs font-medium text-destructive">
+      ❌ Ausente
     </span>
   );
 }
@@ -154,47 +160,91 @@ function Index() {
         </div>
 
         {result && (
-          <section id="resultado" className="mt-16 space-y-6">
-            <div className="flex flex-col items-center gap-6 rounded-2xl border bg-card p-8 shadow-sm md:flex-row md:justify-center md:gap-14">
-              <ScoreRing score={result.score} />
-              <div className="max-w-sm text-center md:text-left">
-                <h2 className={`text-2xl font-bold ${scoreColor(result.score)}`}>
-                  {scoreLabel(result.score)}
-                </h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Seu currículo cobre {result.matched.length} de {result.jobKeywords.length}{" "}
-                  termos-chave identificados na vaga.
-                  {result.score < 70 &&
-                    " Inclua os termos em falta (quando forem verdadeiros para você) para aumentar suas chances."}
-                </p>
+          <section id="resultado" className="mt-16 space-y-8">
+            <div className="rounded-2xl border bg-card p-8 shadow-sm">
+              <h2 className="mb-6 text-xl font-bold">
+                📊 Relatório de Compatibilidade Currículo × Vaga
+              </h2>
+              <div className="flex flex-col items-center gap-6 md:flex-row md:justify-center md:gap-14">
+                <ScoreRing score={result.score} />
+                <div className="max-w-sm text-center md:text-left">
+                  <h3 className={`text-2xl font-bold ${scoreColor(result.score)}`}>
+                    {scoreLabel(result.score)}
+                  </h3>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Seu currículo cobre {result.matched.length} de {result.jobKeywords.length}{" "}
+                    termos-chave identificados na vaga
+                    {result.partial.length > 0 &&
+                      `, com ${result.partial.length} correspondência(s) parcial(is)`}
+                    .
+                    {result.score < 70 &&
+                      " Inclua os termos em falta (quando forem verdadeiros para você) para aumentar suas chances."}
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div className="grid gap-6 md:grid-cols-2">
-              <div className="rounded-2xl border bg-card p-6 shadow-sm">
-                <h3 className="mb-4 font-semibold text-success">
-                  ✅ Pontos fortes ({result.matched.length})
-                </h3>
-                <div className="flex flex-wrap gap-2">
-                  {result.matched.length > 0 ? (
-                    result.matched.map((k) => <Chip key={k} label={k} variant="match" />)
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Nenhum termo em comum encontrado.</p>
-                  )}
+            {result.categories.map((cat) => (
+              <div key={cat.id} className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+                <div className="flex items-center justify-between border-b bg-muted/50 px-6 py-3">
+                  <h3 className="font-semibold">{cat.label}</h3>
+                  <span className="text-sm text-muted-foreground">
+                    {cat.found}/{cat.total} ·{" "}
+                    <span className={`font-semibold ${scoreColor(cat.score)}`}>{cat.score}%</span>
+                  </span>
                 </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs text-muted-foreground">
+                      <th className="px-6 py-2 font-medium">Palavra-chave</th>
+                      <th className="px-6 py-2 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cat.items.map((item) => (
+                      <tr key={item.term} className="border-b last:border-0">
+                        <td className="px-6 py-2.5 font-medium">{item.term}</td>
+                        <td className="px-6 py-2.5">
+                          <StatusBadge status={item.status} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="rounded-2xl border bg-card p-6 shadow-sm">
-                <h3 className="mb-4 font-semibold text-warning">
-                  ⚠️ Lacunas a considerar ({result.missing.length})
-                </h3>
-                <div className="flex flex-wrap gap-2">
-                  {result.missing.length > 0 ? (
-                    result.missing.map((k) => <Chip key={k} label={k} variant="miss" />)
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Nenhuma lacuna — ótimo encaixe!</p>
-                  )}
-                </div>
-              </div>
+            ))}
+
+            <div className="rounded-2xl border bg-card p-6 shadow-sm">
+              <h3 className="mb-4 font-semibold">📋 Resumo da análise</h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs text-muted-foreground">
+                    <th className="py-2 pr-4 font-medium">Categoria</th>
+                    <th className="py-2 pr-4 font-medium">Encontradas</th>
+                    <th className="py-2 font-medium">Pontuação</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.categories.map((cat) => (
+                    <tr key={cat.id} className="border-b last:border-0">
+                      <td className="py-2.5 pr-4">{cat.label}</td>
+                      <td className="py-2.5 pr-4">
+                        {cat.found}/{cat.total}
+                      </td>
+                      <td className={`py-2.5 font-semibold ${scoreColor(cat.score)}`}>
+                        {cat.score}%
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="font-bold">
+                    <td className="py-2.5 pr-4">Total</td>
+                    <td className="py-2.5 pr-4">
+                      {result.matched.length}/{result.jobKeywords.length}
+                    </td>
+                    <td className={`py-2.5 ${scoreColor(result.score)}`}>{result.score}%</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
 
             <p className="text-center text-xs text-muted-foreground">
