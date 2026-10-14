@@ -31,7 +31,9 @@ export function resumeYears(resume: string): number | null {
   const m = n.match(/(\d{1,2}) ano de experiencia/);
   if (m) return Number(m[1]);
   const now = new Date().getFullYear();
-  const years = [...resume.matchAll(/\b(19[7-9]\d|20[0-4]\d)\b/g)].map((x) => Number(x[1]));
+  const exp = rawSections(resume).experiencia.join("\n");
+  const src = exp || resume;
+  const years = [...src.matchAll(/\b(19[7-9]\d|20[0-4]\d)\b/g)].map((x) => Number(x[1]));
   if (!years.length) return null;
   const hasCurrent = /\b(atual|atualmente|presente|o momento)\b/.test(n);
   const max = hasCurrent ? now : Math.max(...years);
@@ -138,6 +140,7 @@ export function buildAtsResume(resume: string, jobCargo: string, analysis: Analy
   const c = extractContact(resume);
   const s = rawSections(resume);
   const proven = analysis.categories
+    .filter((cat) => cat.id !== "cargo")
     .flatMap((cat) => cat.items)
     .filter((i) => i.evidence !== "nao_encontrada")
     .map((i) => i.label);
