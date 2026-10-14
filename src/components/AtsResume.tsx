@@ -156,10 +156,12 @@ export function AtsResume({
   };
   const downloadPdf = () => {
     const w = window.open("", "_blank");
-    if (!w) return toast.error("Permita pop-ups para gerar o PDF.");
+    if (!w) {
+      toast.error("Permita pop-ups para gerar o PDF.");
+      return;
+    }
     w.document.write(htmlDoc());
     w.document.close();
-    w.onload = () => w.print();
     setTimeout(() => w.print(), 400);
     toast.success("Escolha “Salvar como PDF” na janela de impressão.");
   };
@@ -173,7 +175,7 @@ export function AtsResume({
         new Paragraph({ heading: HeadingLevel.HEADING_2, text: s.title.toUpperCase(), spacing: { before: 240 } }),
         ...(s.id === "competencias"
           ? [new Paragraph({ text: s.lines.join(" • ") })]
-          : s.lines.map((l) => new Paragraph({ text: l, bullet: s.id === "experiencia" ? { level: 0 } : undefined }))),
+          : s.lines.map((l) => s.id === "experiencia" ? new Paragraph({ text: l, bullet: { level: 0 } }) : new Paragraph({ text: l }))),
       ]),
     ];
     const blob = await Packer.toBlob(new Document({ sections: [{ children }] }));
