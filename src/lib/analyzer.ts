@@ -1,14 +1,20 @@
-export type KeywordStatus = "encontrada" | "parcial" | "ausente";
+// Motor de análise ATS orientado a competências (100% no navegador).
 
-export interface KeywordItem {
-  term: string;
-  status: KeywordStatus;
+export type Evidence = "forte" | "moderada" | "fraca" | "nao_encontrada";
+export type Requirement = "obrigatorio" | "desejavel";
+
+export interface CompetencyItem {
+  id: string;
+  label: string;
+  requirement: Requirement;
+  evidence: Evidence;
+  matchedAs?: string; // termo do currículo que comprovou
 }
 
 export interface CategoryResult {
   id: string;
   label: string;
-  items: KeywordItem[];
+  items: CompetencyItem[];
   found: number;
   total: number;
   score: number;
@@ -17,196 +23,266 @@ export interface CategoryResult {
 export interface AnalysisResult {
   score: number;
   categories: CategoryResult[];
-  matched: string[];
-  missing: string[];
-  partial: string[];
-  jobKeywords: string[];
+  totalFound: number;
+  totalCompetencies: number;
+  mandatoryMissing: string[];
 }
 
-const STOPWORDS = new Set(
-  (
-    "a o e ou de da do das dos em um uma uns umas para por com sem sob sobre entre ate até apos após " +
-    "que se como mais menos muito muita ja já tambem também ser ter estar foi são sera será seu sua seus suas " +
-    "ao aos à às no na nos nas este esta esse essa isso isto ele ela eles elas nós voce você voces vocês " +
-    "the and or of to in for with on at by from as is are was were be been being have has had will would " +
-    "can could should this that these those it its we you they he she not but if then than so such " +
-    "trabalho trabalhar equipe empresa vaga candidato requisitos requisito desejavel desejável diferencial " +
-    "experiencia experiência conhecimento conhecimentos habilidade habilidades atividades responsabilidades " +
-    "area área anos ano dia dias mes mês horas hora formação superior curso cursos nivel nível " +
-    "etc via vez parte forma novas novo nova grandes grande bom boa bem melhor"
-  ).split(/\s+/)
-);
-
-function normalize(text: string): string {
-  return text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "");
+// ---------- 1. Pré-processamento ----------
+function stripAccents(t: string) {
+  return t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
-export function extractKeywords(text: string): string[] {
-  const words = normalize(text)
-    .replace(/[^a-z0-9+#.\s-]/g, " ")
-    .split(/[\s/(),;:]+/)
-    .map((w) => w.trim())
-    .filter((w) => w.length > 2 && !STOPWORDS.has(w) && !/^\d+$/.test(w));
-
-  const freq = new Map<string, number>();
-  for (const w of words) freq.set(w, (freq.get(w) ?? 0) + 1);
-
-  return [...freq.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([w]) => w);
+function singular(w: string): string {
+  if (w.length <= 4) return w;
+  if (w.endsWith("oes") || w.endsWith("aes")) return w.slice(0, -3) + "ao";
+  if (w.endsWith("ais")) return w.slice(0, -3) + "al";
+  if (w.endsWith("eis")) return w.slice(0, -3) + "el";
+  if (w.endsWith("res") || w.endsWith("zes")) return w.slice(0, -2);
+  if (w.endsWith("s") && !w.endsWith("ss")) return w.slice(0, -1);
+  return w;
 }
 
-// Dicionários de categorias (termos normalizados, sem acento)
-const CATEGORY_LEXICON: { id: string; label: string; terms: string[] }[] = [
-  {
-    id: "tecnicas",
-    label: "Competências Técnicas",
-    terms: [
-      "excel", "word", "powerpoint", "office", "sap", "totvs", "salesforce", "crm", "erp",
-      "python", "java", "javascript", "typescript", "react", "node", "sql", "mysql",
-      "postgresql", "mongodb", "aws", "azure", "gcp", "docker", "kubernetes", "git",
-      "linux", "html", "css", "php", "ruby", "golang", "rust", "kotlin", "swift",
-      "powerbi", "tableau", "looker", "excel avancado", "vba", "macros", "autocad",
-      "photoshop", "illustrator", "figma", "sketch", "premiere", "after effects",
-      "google analytics", "google ads", "facebook ads", "meta ads", "seo", "sem",
-      "hubspot", "rd station", "mailchimp", "zendesk", "jira", "confluence", "trello",
-      "asana", "slack", "teams", "zoom", "notion", "sheets", "planilhas", "dashboards",
-      "machine learning", "deep learning", "inteligencia artificial", "ia", "chatgpt",
-      "tensorflow", "pytorch", "pandas", "numpy", "spark", "hadoop", "kafka", "etl",
-      "api", "rest", "graphql", "microservicos", "devops", "ci cd", "scrum", "agile",
-      "kanban", "lean", "six sigma", "pmbok", "itil", "cobit", "iso", "lgpd",
-      "contabilidade", "fiscal", "tributario", "folha", "dp", "rh", "recrutamento",
-      "selecao", "financeiro", "contas", "faturamento", "compras", "estoque", "logistica",
-      "supply chain", "vendas", "negociacao", "prospeccao", "telemarketing", "ecommerce",
-      "marketplace", "wordpress", "shopify", "magento", "woocommerce", "excel intermediario",
-    ],
-  },
-  {
-    id: "comportamentais",
-    label: "Competências Comportamentais",
-    terms: [
-      "comunicacao", "lideranca", "trabalho em equipe", "proatividade", "organizacao",
-      "planejamento", "criatividade", "inovacao", "adaptabilidade", "flexibilidade",
-      "resiliencia", "empatia", "colaboracao", "negociacao", "persuasao", "networking",
-      "gestao de tempo", "priorizacao", "foco", "disciplina", "comprometimento",
-      "responsabilidade", "autonomia", "iniciativa", "dinamismo", "relacionamento",
-      "interpersonal", "resolucao de problemas", "pensamento critico", "analitico",
-      "atencao aos detalhes", "detalhista", "perfil analitico", "tomada de decisao",
-      "inteligencia emocional", "autogestao", "aprendizado", "curiosidade", "etica",
-    ],
-  },
-  {
-    id: "idiomas",
-    label: "Idiomas",
-    terms: [
-      "ingles", "english", "espanhol", "espanhol avancado", "frances", "alemao",
-      "italiano", "mandarim", "chines", "japones", "portugues", "libras",
-      "fluente", "avancado", "intermediario", "basico", "toefl", "ielts", "b2", "c1",
-    ],
-  },
-  {
-    id: "certificacoes",
-    label: "Certificações",
-    terms: [
-      "certificacao", "certificado", "pmp", "scrum master", "csm", "psm", "itil",
-      "cobit", "aws certified", "azure certified", "gcp", "cfa", "cpa", "crc",
-      "cnae", "iso 9001", "six sigma", "green belt", "black belt", "yellow belt",
-      "google analytics", "google ads", "hubspot", "rd station", "lgpd", "nr35", "nr10",
-    ],
-  },
-  {
-    id: "formacao",
-    label: "Formação Acadêmica",
-    terms: [
-      "superior", "graduacao", "bacharelado", "licenciatura", "tecnologo", "pos",
-      "pos graduacao", "mba", "mestrado", "doutorado", "tecnico", "ensino medio",
-      "engenharia", "administracao", "economia", "contabeis", "direito", "medicina",
-      "enfermagem", "psicologia", "pedagogia", "letras", "jornalismo", "publicidade",
-      "marketing", "sistemas", "computacao", "ciencia da computacao", "analise de sistemas",
-      "arquitetura", "design", "moda", "gastronomia", "turismo", "hotelaria", "logistica",
-      "recursos humanos", "gestao", "comercio exterior", "relacoes internacionais",
-    ],
-  },
-  {
-    id: "experiencia",
-    label: "Experiência Profissional",
-    terms: [
-      "experiencia", "vivencia", "atuacao", "trajetoria", "carreira", "historico",
-      "anos de experiencia", "comprovada", "previa", "anterior", "solido", "consolidada",
-    ],
-  },
+export function normalizeText(t: string): string {
+  return stripAccents(t)
+    .replace(/[^a-z0-9+#\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(singular)
+    .join(" ");
+}
+
+// ---------- 3/5. Catálogo de competências com equivalências semânticas ----------
+type Cat = "cargo" | "hard" | "ferramentas" | "soft" | "idiomas" | "certificacoes" | "formacao";
+
+const CATEGORY_LABELS: Record<Cat, string> = {
+  cargo: "Cargo / Função",
+  hard: "Hard Skills e Responsabilidades",
+  ferramentas: "Ferramentas e Tecnologias",
+  soft: "Soft Skills",
+  idiomas: "Idiomas",
+  certificacoes: "Certificações",
+  formacao: "Formação",
+};
+
+const CATALOG: { id: string; label: string; cat: Cat; aliases: string[] }[] = [
+  // Cargo
+  { id: "analista_implantacao", label: "Analista / Consultor de Implantação", cat: "cargo", aliases: ["analista de implantacao", "consultor de implantacao", "analista de implementacao", "consultor de implementacao", "implantador"] },
+  { id: "analista_suporte", label: "Analista de Suporte", cat: "cargo", aliases: ["analista de suporte", "tecnico de suporte", "suporte tecnico", "help desk", "service desk"] },
+  { id: "analista_dados", label: "Analista de Dados / BI", cat: "cargo", aliases: ["analista de dados", "analista de bi", "analista de business intelligence", "data analyst"] },
+  { id: "desenvolvedor", label: "Desenvolvedor(a)", cat: "cargo", aliases: ["desenvolvedor", "programador", "developer", "engenheiro de software"] },
+  { id: "vendedor", label: "Vendas / Comercial", cat: "cargo", aliases: ["vendedor", "executivo de venda", "consultor comercial", "representante comercial", "inside sale"] },
+
+  // Hard skills / responsabilidades
+  { id: "implantacao", label: "Implantação de Sistemas", cat: "hard", aliases: ["implantacao", "implementacao", "go live", "parametrizacao", "configuracao de sistema"] },
+  { id: "atendimento", label: "Atendimento ao Cliente", cat: "hard", aliases: ["atendimento ao cliente", "atendimento", "suporte ao cliente", "suporte ao usuario", "customer success", "sucesso do cliente", "via telefone", "whatsapp", "sac", "relacionamento com cliente"] },
+  { id: "treinamento", label: "Treinamento / Capacitação", cat: "hard", aliases: ["treinamento", "capacitacao", "capacitar", "treinar", "realizava treinamento", "onboarding", "instrutor", "multiplicador"] },
+  { id: "gestao_projetos", label: "Gestão de Projetos", cat: "hard", aliases: ["gestao de projeto", "gerenciamento de projeto", "gerente de projeto", "project management", "cronograma"] },
+  { id: "levantamento", label: "Levantamento de Requisitos", cat: "hard", aliases: ["levantamento de requisito", "mapeamento de processo", "analise de requisito", "requisitos de negocio"] },
+  { id: "bi", label: "Business Intelligence", cat: "hard", aliases: ["business intelligence", "power bi", "powerbi", "bi", "dashboard", "indicadore", "kpi", "relatorio gerencial"] },
+  { id: "banco_dados", label: "Banco de Dados Relacional", cat: "hard", aliases: ["banco de dado", "sql server", "sql", "mysql", "postgresql", "postgre", "oracle", "consulta sql", "query"] },
+  { id: "vendas", label: "Vendas e Negociação", cat: "hard", aliases: ["venda", "negociacao", "prospeccao", "fechamento de contrato", "funil de venda", "pipeline comercial"] },
+  { id: "financeiro", label: "Rotinas Financeiras", cat: "hard", aliases: ["financeiro", "conta a pagar", "conta a receber", "faturamento", "conciliacao bancaria", "fluxo de caixa"] },
+  { id: "contabil", label: "Contabilidade / Fiscal", cat: "hard", aliases: ["contabilidade", "contabil", "fiscal", "tributario", "apuracao de imposto", "sped"] },
+  { id: "rh", label: "Recursos Humanos", cat: "hard", aliases: ["recrutamento", "selecao", "departamento pessoal", "folha de pagamento", "recursos humano"] },
+  { id: "logistica", label: "Logística / Estoque", cat: "hard", aliases: ["logistica", "estoque", "supply chain", "armazenagem", "expedicao"] },
+  { id: "marketing_digital", label: "Marketing Digital", cat: "hard", aliases: ["marketing digital", "seo", "trafego pago", "google ad", "meta ad", "facebook ad", "midia social", "rede social", "inbound"] },
+  { id: "metodologias_ageis", label: "Metodologias Ágeis", cat: "hard", aliases: ["scrum", "agil", "agile", "kanban", "sprint"] },
+  { id: "documentacao", label: "Documentação de Processos", cat: "hard", aliases: ["documentacao", "manual", "procedimento operacional", "pop"] },
+  { id: "programacao", label: "Programação", cat: "hard", aliases: ["programacao", "desenvolvimento de software", "codigo", "python", "javascript", "typescript", "java", "c#", "php"] },
+
+  // Ferramentas
+  { id: "excel", label: "Excel", cat: "ferramentas", aliases: ["excel", "planilha", "procv", "tabela dinamica"] },
+  { id: "powerbi", label: "Power BI", cat: "ferramentas", aliases: ["power bi", "powerbi"] },
+  { id: "erp", label: "ERP", cat: "ferramentas", aliases: ["erp", "sap", "totvs", "protheus", "senior", "sankhya", "oracle erp", "omie", "bling"] },
+  { id: "crm", label: "CRM", cat: "ferramentas", aliases: ["crm", "salesforce", "hubspot", "pipedrive", "rd station", "zoho"] },
+  { id: "jira", label: "Jira / Gestão de Chamados", cat: "ferramentas", aliases: ["jira", "zendesk", "freshdesk", "glpi", "chamado", "ticket"] },
+  { id: "office", label: "Pacote Office", cat: "ferramentas", aliases: ["pacote office", "office", "word", "powerpoint", "microsoft 365"] },
+  { id: "cloud", label: "Cloud (AWS / Azure / GCP)", cat: "ferramentas", aliases: ["aws", "azure", "gcp", "google cloud", "cloud"] },
+  { id: "git", label: "Git", cat: "ferramentas", aliases: ["git", "github", "gitlab", "bitbucket"] },
+  { id: "react", label: "React", cat: "ferramentas", aliases: ["react", "react j", "next j"] },
+  { id: "docker", label: "Docker / Kubernetes", cat: "ferramentas", aliases: ["docker", "kubernete", "container"] },
+  { id: "figma", label: "Figma / Design", cat: "ferramentas", aliases: ["figma", "photoshop", "illustrator", "canva"] },
+
+  // Soft skills
+  { id: "lideranca", label: "Liderança / Gestão de Equipes", cat: "soft", aliases: ["lideranca", "gestao de equipe", "liderar", "coordenacao de equipe", "lider de equipe", "gestao de pessoa"] },
+  { id: "comunicacao", label: "Comunicação", cat: "soft", aliases: ["comunicacao", "boa comunicacao", "oratoria", "apresentacao"] },
+  { id: "equipe", label: "Trabalho em Equipe", cat: "soft", aliases: ["trabalho em equipe", "colaboracao", "colaborativo", "espirito de equipe"] },
+  { id: "proatividade", label: "Proatividade", cat: "soft", aliases: ["proatividade", "proativo", "iniciativa"] },
+  { id: "organizacao", label: "Organização", cat: "soft", aliases: ["organizacao", "organizado", "gestao de tempo", "planejamento"] },
+  { id: "resolucao", label: "Resolução de Problemas", cat: "soft", aliases: ["resolucao de problema", "solucao de problema", "pensamento critico", "analitico", "raciocinio logico"] },
+  { id: "adaptabilidade", label: "Adaptabilidade", cat: "soft", aliases: ["adaptabilidade", "flexibilidade", "resiliencia"] },
+  { id: "empatia", label: "Empatia", cat: "soft", aliases: ["empatia", "escuta ativa", "inteligencia emocional"] },
+  { id: "negociacao_soft", label: "Negociação e Persuasão", cat: "soft", aliases: ["persuasao", "poder de negociacao", "habilidade de negociacao"] },
+
+  // Idiomas
+  { id: "ingles", label: "Inglês", cat: "idiomas", aliases: ["ingle", "english"] },
+  { id: "espanhol", label: "Espanhol", cat: "idiomas", aliases: ["espanhol", "spanish"] },
+  { id: "frances", label: "Francês", cat: "idiomas", aliases: ["france", "french"] },
+
+  // Certificações
+  { id: "pmp", label: "PMP", cat: "certificacoes", aliases: ["pmp"] },
+  { id: "scrum_cert", label: "Certificação Scrum", cat: "certificacoes", aliases: ["scrum master", "csm", "psm", "pspo"] },
+  { id: "itil", label: "ITIL", cat: "certificacoes", aliases: ["itil"] },
+  { id: "cloud_cert", label: "Certificação Cloud", cat: "certificacoes", aliases: ["aws certified", "azure fundamental", "az 900"] },
+  { id: "six_sigma", label: "Six Sigma", cat: "certificacoes", aliases: ["six sigma", "green belt", "black belt"] },
+  { id: "crc", label: "CRC", cat: "certificacoes", aliases: ["crc"] },
+
+  // Formação
+  { id: "superior_ti", label: "Superior em TI", cat: "formacao", aliases: ["ciencia da computacao", "sistemas de informacao", "analise e desenvolvimento de sistema", "engenharia de software", "engenharia da computacao", "tecnologia da informacao"] },
+  { id: "superior_adm", label: "Superior em Administração / Gestão", cat: "formacao", aliases: ["administracao", "gestao empresarial", "processos gerenciai"] },
+  { id: "superior_cont", label: "Ciências Contábeis / Economia", cat: "formacao", aliases: ["ciencias contabei", "ciencia contabil", "economia"] },
+  { id: "superior", label: "Ensino Superior", cat: "formacao", aliases: ["ensino superior", "superior completo", "graduacao", "bacharelado", "tecnologo", "superior cursando"] },
+  { id: "pos", label: "Pós-graduação / MBA", cat: "formacao", aliases: ["pos graduacao", "mba", "especializacao", "mestrado"] },
 ];
 
-function categorize(keyword: string): string {
-  for (const cat of CATEGORY_LEXICON) {
-    if (cat.terms.some((t) => keyword === t || keyword.includes(t) || t.includes(keyword))) {
-      return cat.id;
-    }
-  }
-  return "tecnicas"; // fallback: termos específicos da vaga tendem a ser técnicos
+const NORMALIZED_CATALOG = CATALOG.map((c) => ({
+  ...c,
+  norm: [...new Set(c.aliases.map(normalizeText))].sort((a, b) => b.length - a.length),
+}));
+
+// ---------- 2. Filtragem de ruído (seções informativas da vaga) ----------
+const NOISE_HEADINGS =
+  /(beneficio|oferecemo|remuneracao|salario|local de trabalho|localizacao|endereco|regime|contratacao|modelo de trabalho|horario|sobre a empresa|sobre nos|quem somo|vale)/;
+const DESIRABLE_HEADINGS = /(desejavel|diferencia|sera um plus|nice to have|bonus|seria um plus)/;
+const MANDATORY_HEADINGS = /(requisito|obrigatorio|exigido|necessario|responsabilidade|atividade|atribuicao|o que voce vai fazer|qualificacao)/;
+
+function isHeading(raw: string) {
+  const t = raw.trim();
+  return t.length > 0 && t.length < 60 && (/:$/.test(t) || !/[.;]/.test(t)) && t.split(/\s+/).length <= 7;
 }
 
-function keywordStatus(keyword: string, resumeNorm: string, resumeWords: Set<string>): KeywordStatus {
-  if (resumeWords.has(keyword)) return "encontrada";
-  if (resumeNorm.includes(keyword)) return "encontrada";
-  // parcial: alguma palavra do currículo compartilha raiz (prefixo de 4+ chars)
-  const root = keyword.slice(0, Math.max(4, Math.floor(keyword.length * 0.7)));
-  for (const w of resumeWords) {
-    if (w.startsWith(root) || keyword.startsWith(w.slice(0, Math.max(4, Math.floor(w.length * 0.7))))) {
-      return "parcial";
-    }
-  }
-  return "ausente";
+function hasPhrase(text: string, phrase: string) {
+  return (" " + text + " ").includes(" " + phrase + " ");
 }
 
-const CATEGORY_ORDER = ["tecnicas", "comportamentais", "idiomas", "certificacoes", "formacao", "experiencia"];
+function findInText(text: string, aliases: string[]) {
+  return aliases.find((a) => hasPhrase(text, a));
+}
+
+// ---------- 7. Peso dos requisitos ----------
+function extractJobCompetencies(job: string) {
+  const found = new Map<string, Requirement>();
+  let mode: "obrigatorio" | "desejavel" | "ruido" = "obrigatorio";
+  for (const raw of job.split(/\n+/)) {
+    const line = normalizeText(raw);
+    if (!line) continue;
+    if (isHeading(raw)) {
+      if (DESIRABLE_HEADINGS.test(line)) { mode = "desejavel"; continue; }
+      if (NOISE_HEADINGS.test(line)) { mode = "ruido"; continue; }
+      if (MANDATORY_HEADINGS.test(line)) { mode = "obrigatorio"; continue; }
+    }
+    if (mode === "ruido") continue;
+    const lineMode: Requirement =
+      mode === "desejavel" || DESIRABLE_HEADINGS.test(line) ? "desejavel" : "obrigatorio";
+    for (const c of NORMALIZED_CATALOG) {
+      if (!findInText(line, c.norm)) continue;
+      const prev = found.get(c.id);
+      if (!prev || (prev === "desejavel" && lineMode === "obrigatorio")) found.set(c.id, lineMode);
+    }
+  }
+  return found;
+}
+
+// ---------- 6. Avaliação por evidência ----------
+type ResumeSection = "experiencia" | "competencias" | "outro";
+const EXP_HEADINGS = /(experiencia|historico profissional|trajetoria|atuacao profissional|carreira)/;
+const SKILL_HEADINGS = /(habilidade|competencia|conhecimento|skill|ferramenta|tecnologia|qualificacoe)/;
+
+function splitResume(resume: string) {
+  const parts: Record<ResumeSection, string[]> = { experiencia: [], competencias: [], outro: [] };
+  let section: ResumeSection = "outro";
+  for (const raw of resume.split(/\n+/)) {
+    const line = normalizeText(raw);
+    if (!line) continue;
+    if (isHeading(raw)) {
+      if (EXP_HEADINGS.test(line)) { section = "experiencia"; continue; }
+      if (SKILL_HEADINGS.test(line)) { section = "competencias"; continue; }
+      if (/(formacao|educacao|idioma|certifica|curso|resumo|objetivo|contato|dados pessoai)/.test(line)) {
+        section = "outro"; continue;
+      }
+    }
+    parts[section].push(line);
+  }
+  return {
+    experiencia: parts.experiencia.join(" \n "),
+    competencias: parts.competencias.join(" \n "),
+    outro: parts.outro.join(" \n "),
+  };
+}
+
+function countOccurrences(text: string, aliases: string[]) {
+  let n = 0;
+  const padded = " " + text + " ";
+  for (const a of aliases) n += padded.split(" " + a + " ").length - 1;
+  return n;
+}
+
+function evaluate(aliases: string[], cat: Cat, sections: ReturnType<typeof splitResume>): { evidence: Evidence; matchedAs?: string } {
+  const inExp = findInText(sections.experiencia, aliases);
+  const inSkills = findInText(sections.competencias, aliases);
+  const inOther = findInText(sections.outro, aliases);
+  const matchedAs = inExp ?? inSkills ?? inOther;
+  if (!matchedAs) return { evidence: "nao_encontrada" };
+  // Idiomas, certificações e formação: estar declarado já é evidência forte
+  if (cat === "idiomas" || cat === "certificacoes" || cat === "formacao") return { evidence: "forte", matchedAs };
+  if (inExp) return { evidence: "forte", matchedAs };
+  if (inSkills) return { evidence: "moderada", matchedAs };
+  const all = `${sections.experiencia} ${sections.competencias} ${sections.outro}`;
+  return { evidence: countOccurrences(all, aliases) >= 2 ? "moderada" : "fraca", matchedAs };
+}
+
+const EVIDENCE_FACTOR: Record<Evidence, number> = { forte: 1, moderada: 0.75, fraca: 0.4, nao_encontrada: 0 };
+const REQUIREMENT_WEIGHT: Record<Requirement, number> = { obrigatorio: 1, desejavel: 0.5 };
+const CAT_ORDER: Cat[] = ["cargo", "hard", "ferramentas", "soft", "idiomas", "certificacoes", "formacao"];
 
 export function analyze(resume: string, job: string): AnalysisResult {
-  const jobKeywords = extractKeywords(job).slice(0, 40);
-  const resumeNorm = normalize(resume);
-  const resumeWords = new Set(extractKeywords(resume));
+  const jobComps = extractJobCompetencies(job);
+  const sections = splitResume(resume);
 
-  const byCategory = new Map<string, KeywordItem[]>();
-  for (const kw of jobKeywords) {
-    const catId = categorize(kw);
-    const status = keywordStatus(kw, resumeNorm, resumeWords);
-    if (!byCategory.has(catId)) byCategory.set(catId, []);
-    byCategory.get(catId)!.push({ term: kw, status });
+  const byCat = new Map<Cat, CompetencyItem[]>();
+  // remove redundância: se "Power BI" (ferramenta) e "BI" (hard) aparecem, ambos ficam — são níveis diferentes
+  for (const c of NORMALIZED_CATALOG) {
+    const req = jobComps.get(c.id);
+    if (!req) continue;
+    const { evidence, matchedAs } = evaluate(c.norm, c.cat, sections);
+    if (!byCat.has(c.cat)) byCat.set(c.cat, []);
+    byCat.get(c.cat)!.push({ id: c.id, label: c.label, requirement: req, evidence, matchedAs });
   }
 
-  const categories: CategoryResult[] = CATEGORY_ORDER.filter((id) => byCategory.has(id)).map(
-    (id) => {
-      const items = byCategory.get(id)!;
-      // peso: encontrada = 1, parcial = 0.5, ausente = 0
-      const weight = items.reduce(
-        (acc, i) => acc + (i.status === "encontrada" ? 1 : i.status === "parcial" ? 0.5 : 0),
-        0
-      );
-      const found = items.filter((i) => i.status === "encontrada").length;
-      return {
-        id,
-        label: CATEGORY_LEXICON.find((c) => c.id === id)!.label,
-        items,
-        found,
-        total: items.length,
-        score: Math.round((weight / items.length) * 100),
-      };
+  let wSum = 0;
+  let wGot = 0;
+  const categories: CategoryResult[] = CAT_ORDER.filter((c) => byCat.has(c)).map((cat) => {
+    const items = byCat.get(cat)!.sort((a, b) =>
+      a.requirement === b.requirement ? 0 : a.requirement === "obrigatorio" ? -1 : 1
+    );
+    let cw = 0;
+    let cg = 0;
+    for (const i of items) {
+      const w = REQUIREMENT_WEIGHT[i.requirement];
+      cw += w;
+      cg += w * EVIDENCE_FACTOR[i.evidence];
     }
-  );
+    wSum += cw;
+    wGot += cg;
+    return {
+      id: cat,
+      label: CATEGORY_LABELS[cat],
+      items,
+      found: items.filter((i) => i.evidence !== "nao_encontrada").length,
+      total: items.length,
+      score: Math.round((cg / cw) * 100),
+    };
+  });
 
-  const totalWeight = categories.reduce((acc, c) => acc + c.score * c.total, 0);
-  const totalItems = categories.reduce((acc, c) => acc + c.total, 0);
-  const score = totalItems === 0 ? 0 : Math.round(totalWeight / totalItems);
-
+  const all = categories.flatMap((c) => c.items);
   return {
-    score,
+    score: wSum === 0 ? 0 : Math.round((wGot / wSum) * 100),
     categories,
-    matched: categories.flatMap((c) => c.items.filter((i) => i.status === "encontrada").map((i) => i.term)),
-    partial: categories.flatMap((c) => c.items.filter((i) => i.status === "parcial").map((i) => i.term)),
-    missing: categories.flatMap((c) => c.items.filter((i) => i.status === "ausente").map((i) => i.term)),
-    jobKeywords,
+    totalFound: all.filter((i) => i.evidence !== "nao_encontrada").length,
+    totalCompetencies: all.length,
+    mandatoryMissing: all
+      .filter((i) => i.requirement === "obrigatorio" && i.evidence === "nao_encontrada")
+      .map((i) => i.label),
   };
 }
