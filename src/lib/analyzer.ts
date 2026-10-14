@@ -8,7 +8,7 @@ export interface CompetencyItem {
   label: string;
   requirement: Requirement;
   evidence: Evidence;
-  matchedAs?: string; // termo do currículo que comprovou
+  matchedAs?: string | undefined; // termo do currículo que comprovou
 }
 
 export interface CategoryResult {
@@ -141,6 +141,9 @@ const NORMALIZED_CATALOG = CATALOG.map((c) => ({
   norm: [...new Set(c.aliases.map(normalizeText))].sort((a, b) => b.length - a.length),
 }));
 
+const ALIAS_DISPLAY = new Map<string, string>();
+for (const c of CATALOG) for (const a of c.aliases) ALIAS_DISPLAY.set(normalizeText(a), a);
+
 // ---------- 2. Filtragem de ruído (seções informativas da vaga) ----------
 const NOISE_HEADINGS =
   /(beneficio|oferecemo|remuneracao|salario|local de trabalho|localizacao|endereco|regime|contratacao|modelo de trabalho|horario|sobre a empresa|sobre nos|quem somo|vale)/;
@@ -247,7 +250,7 @@ export function analyze(resume: string, job: string): AnalysisResult {
     if (!req) continue;
     const { evidence, matchedAs } = evaluate(c.norm, c.cat, sections);
     if (!byCat.has(c.cat)) byCat.set(c.cat, []);
-    byCat.get(c.cat)!.push({ id: c.id, label: c.label, requirement: req, evidence, matchedAs });
+    byCat.get(c.cat)!.push({ id: c.id, label: c.label, requirement: req, evidence, matchedAs: matchedAs && (ALIAS_DISPLAY.get(matchedAs) ?? matchedAs) });
   }
 
   let wSum = 0;
