@@ -1,5 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { extractTextFromFile } from "@/lib/fileParse";
+import { fetchJobFromUrl } from "@/lib/jobUrl.functions";
+import {
+  buildAtsResume, cargoScore, detectJobCargo, detectJobSeniority, detectResumeCargo,
+  detectResumeSeniority, seniorityScore, SENIORITY_LABEL, type Seniority,
+} from "@/lib/profile";
 import { analyze, type AnalysisResult, type Evidence } from "@/lib/analyzer";
 
 export const Route = createFileRoute("/")({
@@ -80,11 +86,73 @@ function EvidenceBadge({ evidence }: { evidence: Evidence }) {
   );
 }
 
+interface Extra {
+  competencyScore: number;
+  cvCargo: string;
+  jobCargo: string;
+  cargoScore: number | null;
+  cvSeniority: Seniority | null;
+  cvYears: number | null;
+  jobSeniority: Seniority | null;
+  jobYears: number | null;
+  seniorityScore: number | null;
+  parts: { label: string; score: number; weight: number }[];
+  atsResume: string;
+}
+
+function StatCard({ title, value, sub }: { title: string; value: number | null; sub: string }) {
+  return (
+    <div className="rounded-2xl border bg-card p-5 shadow-sm">
+      <p className="text-xs font-medium text-muted-foreground">{title}</p>
+      <p className={`mt-1 text-3xl font-bold ${value === null ? "text-muted-foreground" : scoreColor(value)}`}>
+        {value === null ? "—" : `${value}%`}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
+    </div>
+  );
+}
+
 function Index() {
   const [resume, setResume] = useState("");
   const [job, setJob] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState("");
+  const [fileInfo, setFileInfo] = useState("");
+  const [jobUrl, setJobUrl] = useState("");
+  const [loadingUrl, setLoadingUrl] = useState(false);
+  const [extra, setExtra] = useState<Extra | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const onFile = async (f?: File) => {
+    if (!f) return;
+    setError("");
+    setFileInfo("Lendo arquivo...");
+    try {
+      const { text, pages } = await extractTextFromFile(f);
+      setResume(text);
+      setFileInfo(
+        `${f.name} · ${(f.size / 1024).toFixed(0)} KB${pages ? ` · ${pages} página(s)` : ""} · ${text.split(/\s+/).length} palavras`
+      );
+    } catch (e) {
+      setFileInfo("");
+      setError(e instanceof Error ? e.message : "Não foi possível ler o arquivo.");
+    }
+  };
+
+  const loadUrl = async () => {
+    if (!jobUrl.trim()) return;
+    setLoadingUrl(true);
+    setError("");
+    try {
+      const r = await fetchJobFromUrl({ data: { url: jobUrl.trim() } });
+      if (r.ok) setJob(r.text);
+      else setError(r.error);
+    } catch {
+      setError("Link inválido.");
+    } finally {
+      setLoadingUrl(false);
+    }
+  };
 
   const run = () => {
     if (resume.trim().length < 50 || job.trim().length < 50) {
@@ -92,7 +160,27 @@ function Index() {
       return;
     }
     setError("");
-    setResult(analyze(resume, job));
+    const a = analyze(resume, job);
+    const cvCargo = detectResumeCargo(resume);
+    const jobCargo = detectJobCargo(job);
+    const cvSen = detectResumeSeniority(resume, cvCargo);
+    const jobSen = detectJobSeniority(job);
+    const cScore = cargoScore(cvCargo, jobCargo);
+    const sScore = seniorityScore(cvSen.level, jobSen.level);
+    const parts: { label: string; score: number; weight: number }[] = [
+      { label: "Competências", score: a.score, weight: 70 },
+    ];
+    if (cScore !== null) parts.push({ label: "Cargo", score: cScore, weight: 15 });
+    if (sScore !== null) parts.push({ label: "Senioridade", score: sScore, weight: 15 });
+    const tw = parts.reduce((x, p) => x + p.weight, 0);
+    const final = Math.round(parts.reduce((x, p) => x + p.score * p.weight, 0) / tw);
+    setResult({ ...a, score: final });
+    setExtra({
+      competencyScore: a.score, cvCargo, jobCargo, cargoScore: cScore,
+      cvSeniority: cvSen.level, cvYears: cvSen.years, jobSeniority: jobSen.level, jobYears: jobSen.years,
+      seniorityScore: sScore, parts: parts.map((p) => ({ ...p, weight: Math.round((p.weight / tw) * 100) })),
+      atsResume: buildAtsResume(resume, jobCargo, a, cvSen.years),
+    });
     setTimeout(() => {
       document.getElementById("resultado")?.scrollIntoView({ behavior: "smooth" });
     }, 50);
@@ -123,24 +211,57 @@ function Index() {
             <label className="mb-2 block text-sm font-semibold" htmlFor="curriculo">
               📄 Seu currículo
             </label>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="rounded-full border px-4 py-1.5 text-xs font-medium hover:bg-muted"
+              >
+                Enviar PDF ou DOCX
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".pdf,.docx"
+                className="hidden"
+                onChange={(e) => onFile(e.target.files?.[0])}
+              />
+              <span className="text-xs text-muted-foreground">{fileInfo || "ou cole o texto abaixo"}</span>
+            </div>
             <textarea
               id="curriculo"
               value={resume}
               onChange={(e) => setResume(e.target.value)}
               placeholder="Cole aqui o texto do seu currículo: experiências, habilidades, formação..."
-              className="h-64 w-full resize-none rounded-xl border bg-background p-4 text-sm outline-none focus:ring-2 focus:ring-ring"
+              className="h-56 w-full resize-none rounded-xl border bg-background p-4 text-sm outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
           <div className="rounded-2xl border bg-card p-5 shadow-sm">
             <label className="mb-2 block text-sm font-semibold" htmlFor="vaga">
               💼 Descrição da vaga
             </label>
+            <div className="mb-3 flex gap-2">
+              <input
+                value={jobUrl}
+                onChange={(e) => setJobUrl(e.target.value)}
+                placeholder="Cole o link da vaga (opcional)"
+                className="min-w-0 flex-1 rounded-full border bg-background px-4 py-1.5 text-xs outline-none focus:ring-2 focus:ring-ring"
+              />
+              <button
+                type="button"
+                onClick={loadUrl}
+                disabled={loadingUrl}
+                className="rounded-full border px-4 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+              >
+                {loadingUrl ? "Lendo..." : "Importar"}
+              </button>
+            </div>
             <textarea
               id="vaga"
               value={job}
               onChange={(e) => setJob(e.target.value)}
               placeholder="Cole aqui a descrição da vaga: requisitos, responsabilidades, diferenciais..."
-              className="h-64 w-full resize-none rounded-xl border bg-background p-4 text-sm outline-none focus:ring-2 focus:ring-ring"
+              className="h-56 w-full resize-none rounded-xl border bg-background p-4 text-sm outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
         </section>
@@ -177,6 +298,78 @@ function Index() {
                 </div>
               </div>
             </div>
+
+            {extra && (
+              <>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <StatCard title="Competências" value={extra.competencyScore} sub={`${result.totalFound} de ${result.totalCompetencies} comprovadas`} />
+                  <StatCard
+                    title="Compatibilidade de cargo"
+                    value={extra.cargoScore}
+                    sub={`Você: ${extra.cvCargo || "não identificado"} · Vaga: ${extra.jobCargo || "não identificado"}`}
+                  />
+                  <StatCard
+                    title="Compatibilidade de senioridade"
+                    value={extra.seniorityScore}
+                    sub={`Você: ${extra.cvSeniority ? SENIORITY_LABEL[extra.cvSeniority] : "não identificado"}${extra.cvYears !== null ? ` (~${extra.cvYears} anos)` : ""} · Vaga: ${extra.jobSeniority ? SENIORITY_LABEL[extra.jobSeniority] : "não identificado"}`}
+                  />
+                </div>
+
+                <div className="rounded-2xl border bg-card p-6 shadow-sm">
+                  <h3 className="mb-3 font-semibold">🧮 Como o score foi calculado</h3>
+                  <ul className="space-y-1 text-sm">
+                    {extra.parts.map((p) => (
+                      <li key={p.label} className="flex justify-between border-b py-1.5 last:border-0">
+                        <span>{p.label} <span className="text-muted-foreground">(peso {p.weight}%)</span></span>
+                        <span className={`font-semibold ${scoreColor(p.score)}`}>{p.score}%</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Requisitos obrigatórios valem o dobro dos desejáveis. Evidência forte (na experiência) vale 100%,
+                    moderada (só em competências) 75% e fraca 40%.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border bg-card p-6 shadow-sm">
+                  <h3 className="mb-3 font-semibold">🔍 Gap Analysis — o que falta</h3>
+                  {(() => {
+                    const items = result.categories.flatMap((c) => c.items);
+                    const missing = items.filter((i) => i.evidence === "nao_encontrada");
+                    const weak = items.filter((i) => i.evidence === "fraca" || i.evidence === "moderada");
+                    if (!missing.length && !weak.length)
+                      return <p className="text-sm text-muted-foreground">Nenhuma lacuna relevante encontrada. 🎉</p>;
+                    return (
+                      <div className="space-y-4 text-sm">
+                        {missing.length > 0 && (
+                          <div>
+                            <p className="mb-1 font-medium">Não encontradas no currículo</p>
+                            <ul className="list-disc space-y-0.5 pl-5">
+                              {missing.map((i) => (
+                                <li key={i.id}>
+                                  {i.label}{" "}
+                                  <span className="text-xs text-muted-foreground">
+                                    ({i.requirement === "obrigatorio" ? "obrigatório" : "desejável"})
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {weak.length > 0 && (
+                          <div>
+                            <p className="mb-1 font-medium">Pouca evidência — descreva na experiência</p>
+                            <ul className="list-disc space-y-0.5 pl-5">
+                              {weak.map((i) => <li key={i.id}>{i.label}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </>
+            )}
 
             {result.categories.map((cat) => (
               <div key={cat.id} className="overflow-hidden rounded-2xl border bg-card shadow-sm">
@@ -249,6 +442,42 @@ function Index() {
                 </tbody>
               </table>
             </div>
+
+            {extra && (
+              <div className="rounded-2xl border bg-card p-6 shadow-sm">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="font-semibold">📝 Currículo ATS-friendly</h3>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => navigator.clipboard.writeText(extra.atsResume)}
+                      className="rounded-full border px-4 py-1.5 text-xs font-medium hover:bg-muted"
+                    >
+                      Copiar
+                    </button>
+                    <button
+                      onClick={() => {
+                        const url = URL.createObjectURL(new Blob([extra.atsResume], { type: "text/plain;charset=utf-8" }));
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = "curriculo-ats.txt";
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                      className="rounded-full bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground"
+                    >
+                      Baixar .txt
+                    </button>
+                  </div>
+                </div>
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Formato simples, sem tabelas nem colunas, com seções padrão. Usa apenas o que está no seu currículo —
+                  nenhuma informação foi inventada. Revise antes de enviar.
+                </p>
+                <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-xl border bg-background p-4 text-xs">
+                  {extra.atsResume}
+                </pre>
+              </div>
+            )}
 
             <p className="text-center text-xs text-muted-foreground">
               A análise compara competências (não palavras soltas), considera equivalências, o peso
